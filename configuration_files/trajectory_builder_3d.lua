@@ -12,11 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-MAX_3D_RANGE = 60.
+MAX_3D_RANGE = 30. -- default 60.
 INTENSITY_THRESHOLD = 40
 
 TRAJECTORY_BUILDER_3D = {
-  min_range = 1.,
+  min_range = 0.5, -- default 1.
   max_range = MAX_3D_RANGE,
   num_accumulated_range_data = 1,
   voxel_filter_size = 0.15,
