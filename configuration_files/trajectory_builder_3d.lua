@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-MAX_3D_RANGE = 30. -- default 60.
+MAX_3D_RANGE = 45. -- default 60.
 INTENSITY_THRESHOLD = 40
 
 TRAJECTORY_BUILDER_3D = {
@@ -50,7 +50,7 @@ TRAJECTORY_BUILDER_3D = {
         intensity_threshold = INTENSITY_THRESHOLD,
     },
     translation_weight = 5.,
-    rotation_weight = 4e2,
+    rotation_weight = 4e2, -- TO DO 
     only_optimize_yaw = false,
     ceres_solver_options = {
       use_nonmonotonic_steps = false,
@@ -62,7 +62,7 @@ TRAJECTORY_BUILDER_3D = {
   motion_filter = {
     max_time_seconds = 0.5,
     max_distance_meters = 0.1,
-    max_angle_radians = 0.004,
+    max_angle_radians = 0.004, -- TO DO -- Search this -- could be higher for lower sample rate
   },
 
   rotational_histogram_size = 120,
@@ -70,7 +70,7 @@ TRAJECTORY_BUILDER_3D = {
   -- TODO(schwoere,wohe): Remove this constant. This is only kept for ROS.
   imu_gravity_time_constant = 10.,
   pose_extrapolator = {
-    use_imu_based = false,
+    use_imu_based = false, -- confirm this
     constant_velocity = {
       imu_gravity_time_constant = 10.,
       pose_queue_duration = 0.001,
@@ -80,7 +80,7 @@ TRAJECTORY_BUILDER_3D = {
       pose_queue_duration = 5.,
       gravity_constant = 9.806,
       pose_translation_weight = 1.,
-      pose_rotation_weight = 1.,
+      pose_rotation_weight = 1., -- TO DO
       imu_acceleration_weight = 1.,
       imu_rotation_weight = 1.,
       odometry_translation_weight = 1.,
@@ -109,5 +109,5 @@ TRAJECTORY_BUILDER_3D = {
   -- When setting use_intensities to true, the intensity_cost_function_options_0
   -- parameter in ceres_scan_matcher has to be set up as well or otherwise
   -- CeresScanMatcher will CHECK-fail.
-  use_intensities = false,
+  use_intensities = false, -- try this -- TO DO
 }
