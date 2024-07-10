@@ -94,7 +94,7 @@ TRAJECTORY_BUILDER_3D = {
   },
 
   submaps = {
-    high_resolution = 0.01,
+    high_resolution = 0.10,
     high_resolution_max_range = 20.,
     low_resolution = 0.45,
     num_range_data = 160,
