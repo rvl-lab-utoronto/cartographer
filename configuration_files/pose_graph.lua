@@ -34,7 +34,7 @@ POSE_GRAPH = {
       ceres_solver_options = {
         use_nonmonotonic_steps = true,
         max_num_iterations = 10,
-        num_threads = 1,
+        num_threads = 12,
       },
     },
     fast_correlative_scan_matcher_3d = {
@@ -55,7 +55,7 @@ POSE_GRAPH = {
       ceres_solver_options = {
         use_nonmonotonic_steps = false,
         max_num_iterations = 10,
-        num_threads = 1,
+        num_threads = 12,
       },
     },
   },
@@ -64,7 +64,7 @@ POSE_GRAPH = {
   optimization_problem = {
     huber_scale = 1e1,
     acceleration_weight = 1.1e2,
-    rotation_weight = 1.6e4, 
+    rotation_weight = 1.6e4,
     local_slam_pose_translation_weight = 1e5,
     local_slam_pose_rotation_weight = 1e5,
     odometry_translation_weight = 1e5,
@@ -80,7 +80,7 @@ POSE_GRAPH = {
     ceres_solver_options = {
       use_nonmonotonic_steps = false,
       max_num_iterations = 50,
-      num_threads = 7,
+      num_threads = 12,
     },
   },
   max_num_final_iterations = 200,

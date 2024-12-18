@@ -79,7 +79,7 @@ TRAJECTORY_BUILDER_2D = {
       solver_options = {
         use_nonmonotonic_steps = false;
         max_num_iterations = 10;
-        num_threads = 1;
+        num_threads = 12;
       },
     },
   },
