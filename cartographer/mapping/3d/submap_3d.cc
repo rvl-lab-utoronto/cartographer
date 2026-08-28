@@ -34,6 +34,7 @@ struct PixelData {
   int count = 0;
   float probability_sum = 0.f;
   float max_probability = 0.5f;
+  float min_probability = 1.f;
 };
 
 // Filters 'range_data', retaining only the returns that have no more than
@@ -70,6 +71,7 @@ std::vector<PixelData> AccumulatePixelData(
         ValueToProbability(voxel_index_and_probability[3]);
     pixel.probability_sum += probability;
     pixel.max_probability = std::max(pixel.max_probability, probability);
+    pixel.min_probability = std::min(pixel.min_probability, probability);
   }
   return accumulated_pixel_data;
 }
@@ -83,14 +85,13 @@ std::vector<Eigen::Array4i> ExtractVoxelData(
   std::vector<Eigen::Array4i> voxel_indices_and_probabilities;
   const float resolution_inverse = 1.f / hybrid_grid.resolution();
 
-  constexpr float kXrayObstructedCellProbabilityLimit = 0.501f;
+  // Fork change (2026-08-28, nav-grade projection): upstream skipped every
+  // cell below 0.501 here ("non-obstructed"), so observed FREE space never
+  // reached the texture and the published /map had no real free evidence.
+  // Keep ALL observed voxels; ComputePixelValues decides per column whether
+  // it renders occupied (any voxel above 0.5) or free (observed, none above).
   for (auto it = HybridGrid::Iterator(hybrid_grid); !it.Done(); it.Next()) {
     const uint16 probability_value = it.GetValue();
-    const float probability = ValueToProbability(probability_value);
-    if (probability < kXrayObstructedCellProbabilityLimit) {
-      // We ignore non-obstructed cells.
-      continue;
-    }
 
     const Eigen::Vector3f cell_center_submap =
         hybrid_grid.GetCenterOfCell(it.GetCellIndex());
@@ -115,26 +116,29 @@ std::string ComputePixelValues(
     const std::vector<PixelData>& accumulated_pixel_data) {
   std::string cell_data;
   cell_data.reserve(2 * accumulated_pixel_data.size());
-  constexpr float kMinZDifference = 3.f;
-  constexpr float kFreeSpaceWeight = 0.15f;
+  // Fork change (2026-08-28, nav-grade projection; field-validated 2026-08-28):
+  // upstream rendered an X-ray heuristic (columns spanning < 3 voxels in z
+  // were UNKNOWN, so curbs/bollards vanished; values were column AVERAGES
+  // diluted by a fabricated free-space weight, so walls came out mid-gray,
+  // which the costmap StaticLayer trinarizes to FREE). The /map consumer
+  // needs 2D-map semantics instead: a column with ANY voxel above 0.5 is
+  // occupied at the column's MAX probability; an observed column with none
+  // is free at its strongest (minimum) free probability; only never-observed
+  // columns stay unknown. The input cloud is pre-masked (ground and movers
+  // removed), the same trust the 2D pipeline placed in it via min_z/max_z
+  // -100..100, so no z-band is applied here either.
+  constexpr float kOccupiedThreshold = 0.501f;
   for (const PixelData& pixel : accumulated_pixel_data) {
-    // TODO(whess): Take into account submap rotation.
-    // TODO(whess): Document the approach and make it more independent from the
-    // chosen resolution.
-    const float z_difference = pixel.count > 0 ? pixel.max_z - pixel.min_z : 0;
-    if (z_difference < kMinZDifference) {
+    if (pixel.count == 0) {
       cell_data.push_back(0);  // value
       cell_data.push_back(0);  // alpha
       continue;
     }
-    const float free_space = std::max(z_difference - pixel.count, 0.f);
-    const float free_space_weight = kFreeSpaceWeight * free_space;
-    const float total_weight = pixel.count + free_space_weight;
-    const float free_space_probability = 1.f - pixel.max_probability;
-    const float average_probability = ClampProbability(
-        (pixel.probability_sum + free_space_probability * free_space_weight) /
-        total_weight);
-    const int delta = 128 - ProbabilityToLogOddsInteger(average_probability);
+    const float probability =
+        ClampProbability(pixel.max_probability >= kOccupiedThreshold
+                             ? pixel.max_probability
+                             : pixel.min_probability);
+    const int delta = 128 - ProbabilityToLogOddsInteger(probability);
     const uint8 alpha = delta > 0 ? 0 : -delta;
     const uint8 value = delta > 0 ? delta : 0;
     cell_data.push_back(value);                         // value
@@ -146,8 +150,9 @@ std::string ComputePixelValues(
 void AddToTextureProto(
     const HybridGrid& hybrid_grid, const transform::Rigid3d& global_submap_pose,
     proto::SubmapQuery::Response::SubmapTexture* const texture) {
-  // Generate an X-ray view through the 'hybrid_grid', aligned to the
-  // xy-plane in the global map frame.
+  // Generate a top-down occupancy projection of the 'hybrid_grid', aligned to
+  // the xy-plane in the global map frame (fork: was an X-ray view; see
+  // ComputePixelValues).
   const float resolution = hybrid_grid.resolution();
   texture->set_resolution(resolution);
 
