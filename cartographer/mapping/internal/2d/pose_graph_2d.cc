@@ -81,7 +81,7 @@ std::vector<SubmapId> PoseGraph2D::InitializeGlobalSubmapPoses(
     // If we don't already have an entry for the first submap, add one.
     if (submap_data.SizeOfTrajectoryOrZero(trajectory_id) == 0) {
       if (data_.initial_trajectory_poses.count(trajectory_id) > 0) {
-        data_.trajectory_connectivity_state.Connect(
+        ConnectAlsoToAllFrozen(
             trajectory_id,
             data_.initial_trajectory_poses.at(trajectory_id).to_trajectory_id,
             time);
@@ -419,9 +419,35 @@ void PoseGraph2D::UpdateTrajectoryConnectivity(const Constraint& constraint) {
   CHECK_EQ(constraint.tag, Constraint::INTER_SUBMAP);
   const common::Time time =
       GetLatestNodeTime(constraint.node_id, constraint.submap_id);
-  data_.trajectory_connectivity_state.Connect(
-      constraint.node_id.trajectory_id, constraint.submap_id.trajectory_id,
-      time);
+  ConnectAlsoToAllFrozen(constraint.node_id.trajectory_id,
+                         constraint.submap_id.trajectory_id, time);
+}
+
+// Fork (2026-09-08): a connection to one FROZEN trajectory counts as a
+// connection to every frozen trajectory. Frozen trajectories are rigid to
+// each other (a map extended with load_frozen_state has two of them), but
+// ComputeConstraint decides local-vs-global search per (node trajectory,
+// submap trajectory) PAIR from LastConnectionTime. With two frozen
+// trajectories the live one, once tied to trajectory 0 by the initial pose
+// or a constraint, stayed "never connected" to trajectory 1, so trajectory
+// 1's submaps could only ever be matched by the sampled full-submap global
+// search: ~10 s per attempt on 0.02 m submaps, blocking the pose-graph work
+// queue each time (measured in rosout 2026-09-08: the queue grew at the
+// sensor input rate for 10 s at a time), and no local constraints at all in
+// trajectory 1's area until one global match succeeded.
+void PoseGraph2D::ConnectAlsoToAllFrozen(const int trajectory_id,
+                                         const int other_trajectory_id,
+                                         const common::Time time) {
+  data_.trajectory_connectivity_state.Connect(trajectory_id,
+                                              other_trajectory_id, time);
+  if (!IsTrajectoryFrozen(other_trajectory_id)) return;
+  for (const auto& it : data_.trajectories_state) {
+    if (it.second.state == TrajectoryState::FROZEN && it.first != trajectory_id &&
+        it.first != other_trajectory_id) {
+      data_.trajectory_connectivity_state.Connect(trajectory_id, it.first,
+                                                  time);
+    }
+  }
 }
 
 void PoseGraph2D::DeleteTrajectoriesIfNeeded() {

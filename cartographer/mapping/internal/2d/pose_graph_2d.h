@@ -237,6 +237,11 @@ class PoseGraph2D : public PoseGraph {
   // Updates the trajectory connectivity structure with a new constraint.
   void UpdateTrajectoryConnectivity(const Constraint& constraint)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  // Connect 'trajectory_id' to 'other_trajectory_id' and, if that one is
+  // frozen, to every other frozen trajectory as well (fork, see .cc).
+  void ConnectAlsoToAllFrozen(int trajectory_id, int other_trajectory_id,
+                              common::Time time)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   const proto::PoseGraphOptions options_;
   GlobalSlamOptimizationCallback global_slam_optimization_callback_;
