@@ -47,6 +47,19 @@ message ConstraintBuilderOptions {
   // If enabled, logs information of loop-closing constraints for debugging.
   bool log_matches = 8;
 
+  // Bootstrap search for a trajectory started with an initial pose (pure
+  // localization after a pose click). For its first 'initial_pose_num_nodes'
+  // nodes, or until its first constraint to another trajectory is found,
+  // every finished submap within 'max_constraint_distance' is matched on every
+  // node (no sampling) with the window and score floor below, and the pose
+  // graph is optimized after every node so the correction lands as soon as the
+  // matches finish. Afterwards the regular sampling_ratio, search window and
+  // min_score apply. 0 disables the bootstrap (stock behavior).
+  int32 initial_pose_num_nodes = 15;
+  double initial_pose_linear_search_window = 16;
+  double initial_pose_angular_search_window = 17;
+  double initial_pose_min_score = 18;
+
   // Options for the internally used scan matchers.
   mapping.scan_matching.proto.FastCorrelativeScanMatcherOptions2D
       fast_correlative_scan_matcher_options = 9;

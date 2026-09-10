@@ -132,6 +132,14 @@ class FastCorrelativeScanMatcher2D {
   // restricted to the configured search window. If a score above 'min_score'
   // (excluding equality) is possible, true is returned, and 'score' and
   // 'pose_estimate' are updated with the result.
+  // As Match(), but with the given search window (half widths, meters and
+  // radians) instead of the configured one.
+  bool MatchWithWindow(const transform::Rigid2d& initial_pose_estimate,
+                       const sensor::PointCloud& point_cloud,
+                       double linear_search_window,
+                       double angular_search_window, float min_score,
+                       float* score, transform::Rigid2d* pose_estimate) const;
+
   bool MatchFullSubmap(const sensor::PointCloud& point_cloud, float min_score,
                        float* score, transform::Rigid2d* pose_estimate) const;
 

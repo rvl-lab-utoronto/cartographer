@@ -192,9 +192,11 @@ class PoseGraph2D : public PoseGraph {
       std::vector<std::shared_ptr<const Submap2D>> insertion_submaps,
       bool newly_finished_submap) LOCKS_EXCLUDED(mutex_);
 
-  // Computes constraints for a node and submap pair.
-  void ComputeConstraint(const NodeId& node_id, const SubmapId& submap_id)
-      LOCKS_EXCLUDED(mutex_);
+  // Computes constraints for a node and submap pair. 'bootstrap': the node's
+  // trajectory was just started from an initial pose and is not yet tied to
+  // another trajectory, match unsampled with the initial_pose_* window.
+  void ComputeConstraint(const NodeId& node_id, const SubmapId& submap_id,
+                         bool bootstrap = false) LOCKS_EXCLUDED(mutex_);
 
   // Deletes trajectories waiting for deletion. Must not be called during
   // constraint search.
@@ -258,6 +260,12 @@ class PoseGraph2D : public PoseGraph {
 
   // Number of nodes added since last loop closure.
   int num_nodes_since_last_loop_closure_ GUARDED_BY(mutex_) = 0;
+
+  // Trajectories started from an initial pose that are still in the bootstrap
+  // search (constraint_builder_options.initial_pose_*): trajectory id to the
+  // number of bootstrap nodes left. Erased at the first constraint to another
+  // trajectory or when the count runs out.
+  std::map<int, int> bootstrap_nodes_left_ GUARDED_BY(mutex_);
 
   // Current optimization problem.
   std::unique_ptr<optimization::OptimizationProblem2D> optimization_problem_;

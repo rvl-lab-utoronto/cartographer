@@ -40,6 +40,14 @@ proto::ConstraintBuilderOptions CreateConstraintBuilderOptions(
   options.set_loop_closure_rotation_weight(
       parameter_dictionary->GetDouble("loop_closure_rotation_weight"));
   options.set_log_matches(parameter_dictionary->GetBool("log_matches"));
+  options.set_initial_pose_num_nodes(
+      parameter_dictionary->GetNonNegativeInt("initial_pose_num_nodes"));
+  options.set_initial_pose_linear_search_window(
+      parameter_dictionary->GetDouble("initial_pose_linear_search_window"));
+  options.set_initial_pose_angular_search_window(
+      parameter_dictionary->GetDouble("initial_pose_angular_search_window"));
+  options.set_initial_pose_min_score(
+      parameter_dictionary->GetDouble("initial_pose_min_score"));
   *options.mutable_fast_correlative_scan_matcher_options() =
       scan_matching::CreateFastCorrelativeScanMatcherOptions2D(
           parameter_dictionary->GetDictionary("fast_correlative_scan_matcher")

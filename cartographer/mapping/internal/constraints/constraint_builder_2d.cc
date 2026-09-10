@@ -77,12 +77,13 @@ ConstraintBuilder2D::~ConstraintBuilder2D() {
 void ConstraintBuilder2D::MaybeAddConstraint(
     const SubmapId& submap_id, const Submap2D* const submap,
     const NodeId& node_id, const TrajectoryNode::Data* const constant_data,
-    const transform::Rigid2d& initial_relative_pose) {
+    const transform::Rigid2d& initial_relative_pose, const bool bootstrap) {
   if (initial_relative_pose.translation().norm() >
       options_.max_constraint_distance()) {
     return;
   }
-  if (!per_submap_sampler_
+  if (!bootstrap &&
+      !per_submap_sampler_
            .emplace(std::piecewise_construct, std::forward_as_tuple(submap_id),
                     std::forward_as_tuple(options_.sampling_ratio()))
            .first->second.Pulse()) {
@@ -102,8 +103,8 @@ void ConstraintBuilder2D::MaybeAddConstraint(
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
     ComputeConstraint(submap_id, submap, node_id, false, /* match_full_submap */
-                      constant_data, initial_relative_pose, *scan_matcher,
-                      constraint);
+                      bootstrap, constant_data, initial_relative_pose,
+                      *scan_matcher, constraint);
   });
   constraint_task->AddDependency(scan_matcher->creation_task_handle);
   auto constraint_task_handle =
@@ -127,6 +128,7 @@ void ConstraintBuilder2D::MaybeAddGlobalConstraint(
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
     ComputeConstraint(submap_id, submap, node_id, true, /* match_full_submap */
+                      false, /* bootstrap */
                       constant_data, transform::Rigid2d::Identity(),
                       *scan_matcher, constraint);
   });
@@ -187,7 +189,7 @@ ConstraintBuilder2D::DispatchScanMatcherConstruction(const SubmapId& submap_id,
 
 void ConstraintBuilder2D::ComputeConstraint(
     const SubmapId& submap_id, const Submap2D* const submap,
-    const NodeId& node_id, bool match_full_submap,
+    const NodeId& node_id, bool match_full_submap, const bool bootstrap,
     const TrajectoryNode::Data* const constant_data,
     const transform::Rigid2d& initial_relative_pose,
     const SubmapScanMatcher& submap_scan_matcher,
@@ -218,6 +220,19 @@ void ConstraintBuilder2D::ComputeConstraint(
       CHECK_GE(submap_id.trajectory_id, 0);
       kGlobalConstraintsFoundMetric->Increment();
       kGlobalConstraintScoresMetric->Observe(score);
+    } else {
+      return;
+    }
+  } else if (bootstrap) {
+    kConstraintsSearchedMetric->Increment();
+    if (submap_scan_matcher.fast_correlative_scan_matcher->MatchWithWindow(
+            initial_pose, constant_data->filtered_gravity_aligned_point_cloud,
+            options_.initial_pose_linear_search_window(),
+            options_.initial_pose_angular_search_window(),
+            options_.initial_pose_min_score(), &score, &pose_estimate)) {
+      CHECK_GT(score, options_.initial_pose_min_score());
+      kConstraintsFoundMetric->Increment();
+      kConstraintScoresMetric->Observe(score);
     } else {
       return;
     }

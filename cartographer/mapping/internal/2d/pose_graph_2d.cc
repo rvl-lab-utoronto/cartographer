@@ -85,6 +85,14 @@ std::vector<SubmapId> PoseGraph2D::InitializeGlobalSubmapPoses(
             trajectory_id,
             data_.initial_trajectory_poses.at(trajectory_id).to_trajectory_id,
             time);
+        const int bootstrap_nodes =
+            options_.constraint_builder_options().initial_pose_num_nodes();
+        if (bootstrap_nodes > 0) {
+          bootstrap_nodes_left_[trajectory_id] = bootstrap_nodes;
+          LOG(INFO) << "Trajectory " << trajectory_id
+                    << ": bootstrap search from the initial pose for up to "
+                    << bootstrap_nodes << " nodes.";
+        }
       }
       optimization_problem_->AddSubmap(
           trajectory_id, transform::Project2D(
@@ -259,7 +267,8 @@ void PoseGraph2D::AddLandmarkData(int trajectory_id,
 }
 
 void PoseGraph2D::ComputeConstraint(const NodeId& node_id,
-                                    const SubmapId& submap_id) {
+                                    const SubmapId& submap_id,
+                                    const bool bootstrap) {
   bool maybe_add_local_constraint = false;
   bool maybe_add_global_constraint = false;
   const TrajectoryNode::Data* constant_data;
@@ -302,7 +311,8 @@ void PoseGraph2D::ComputeConstraint(const NodeId& node_id,
             .global_pose.inverse() *
         optimization_problem_->node_data().at(node_id).global_pose_2d;
     constraint_builder_.MaybeAddConstraint(
-        submap_id, submap, node_id, constant_data, initial_relative_pose);
+        submap_id, submap, node_id, constant_data, initial_relative_pose,
+        bootstrap && submap_id.trajectory_id != node_id.trajectory_id);
   } else if (maybe_add_global_constraint) {
     constraint_builder_.MaybeAddGlobalConstraint(submap_id, submap, node_id,
                                                  constant_data);
@@ -376,8 +386,22 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
     }
   }
 
+  bool bootstrap = false;
+  {
+    absl::MutexLock locker(&mutex_);
+    auto it = bootstrap_nodes_left_.find(node_id.trajectory_id);
+    if (it != bootstrap_nodes_left_.end()) {
+      bootstrap = true;
+      if (--it->second <= 0) {
+        LOG(WARNING) << "Trajectory " << node_id.trajectory_id
+                     << ": bootstrap search ended without a constraint to "
+                        "the map, falling back to the sampled search.";
+        bootstrap_nodes_left_.erase(it);
+      }
+    }
+  }
   for (const auto& submap_id : finished_submap_ids) {
-    ComputeConstraint(node_id, submap_id);
+    ComputeConstraint(node_id, submap_id, bootstrap);
   }
 
   if (newly_finished_submap) {
@@ -394,6 +418,11 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
   constraint_builder_.NotifyEndOfNode();
   absl::MutexLock locker(&mutex_);
   ++num_nodes_since_last_loop_closure_;
+  // Bootstrap: optimize after every node so a found constraint is applied
+  // (map->odom corrected) as soon as its matches finish.
+  if (bootstrap) {
+    return WorkItem::Result::kRunOptimization;
+  }
   if (options_.optimize_every_n_nodes() > 0 &&
       num_nodes_since_last_loop_closure_ > options_.optimize_every_n_nodes()) {
     return WorkItem::Result::kRunOptimization;
@@ -473,6 +502,22 @@ void PoseGraph2D::HandleWorkQueue(
     absl::MutexLock locker(&mutex_);
     data_.constraints.insert(data_.constraints.end(), result.begin(),
                              result.end());
+    // A constraint to another trajectory ends that trajectory's bootstrap.
+    for (const Constraint& constraint : result) {
+      if (constraint.tag != Constraint::INTER_SUBMAP ||
+          constraint.node_id.trajectory_id ==
+              constraint.submap_id.trajectory_id) {
+        continue;
+      }
+      auto it = bootstrap_nodes_left_.find(constraint.node_id.trajectory_id);
+      if (it != bootstrap_nodes_left_.end()) {
+        LOG(INFO) << "Trajectory " << it->first
+                  << ": localized (constraint to trajectory "
+                  << constraint.submap_id.trajectory_id
+                  << "), bootstrap search over.";
+        bootstrap_nodes_left_.erase(it);
+      }
+    }
   }
   RunOptimization();
 

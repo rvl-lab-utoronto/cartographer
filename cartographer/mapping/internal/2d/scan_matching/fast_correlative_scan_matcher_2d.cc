@@ -207,6 +207,19 @@ bool FastCorrelativeScanMatcher2D::Match(
                                    pose_estimate);
 }
 
+bool FastCorrelativeScanMatcher2D::MatchWithWindow(
+    const transform::Rigid2d& initial_pose_estimate,
+    const sensor::PointCloud& point_cloud, const double linear_search_window,
+    const double angular_search_window, const float min_score, float* score,
+    transform::Rigid2d* pose_estimate) const {
+  const SearchParameters search_parameters(linear_search_window,
+                                           angular_search_window, point_cloud,
+                                           limits_.resolution());
+  return MatchWithSearchParameters(search_parameters, initial_pose_estimate,
+                                   point_cloud, min_score, score,
+                                   pose_estimate);
+}
+
 bool FastCorrelativeScanMatcher2D::MatchFullSubmap(
     const sensor::PointCloud& point_cloud, float min_score, float* score,
     transform::Rigid2d* pose_estimate) const {
