@@ -358,20 +358,28 @@ std::map<int, int> MapBuilder::LoadState(
   }
 
   if (load_frozen_state) {
-    // Add information about which nodes belong to which submap.
-    // This is required, even without constraints.
-    for (const proto::PoseGraph::Constraint& constraint_proto :
-         pose_graph_proto.constraint()) {
-      if (constraint_proto.tag() !=
-          proto::PoseGraph::Constraint::INTRA_SUBMAP) {
-        continue;
+    // Fork (2026-09-11): keep the INTRA_SUBMAP constraints of frozen
+    // trajectories, not only their node->submap membership. Upstream kept
+    // membership alone (AddNodeToSubmap), so a state loaded frozen and saved
+    // again lost those constraints for good - and chunked mapping loads the
+    // previous chunk frozen every time. OverlappingSubmapsTrimmer2D ranks
+    // submap freshness by intra-submap constraints, so any submap that had
+    // once been loaded frozen could never be trimmed (measured: 73 of 186
+    // submaps visible to the trimmer after a single such cycle).
+    // Frozen nodes and submaps are constant parameter blocks in
+    // OptimizationProblem2D::Solve, so these residuals cost nothing.
+    // AddSerializedConstraints records the membership too (same as the
+    // unfrozen branch below). INTER_SUBMAP constraints stay excluded as
+    // upstream: a frozen trajectory's connectivity comes from the initial
+    // pose / new constraints (see PoseGraph2D::ConnectAlsoToAllFrozen).
+    std::vector<PoseGraph::Constraint> intra_constraints;
+    for (PoseGraph::Constraint& constraint :
+         FromProto(pose_graph_proto.constraint())) {
+      if (constraint.tag == PoseGraph::Constraint::INTRA_SUBMAP) {
+        intra_constraints.push_back(std::move(constraint));
       }
-      pose_graph_->AddNodeToSubmap(
-          NodeId{constraint_proto.node_id().trajectory_id(),
-                 constraint_proto.node_id().node_index()},
-          SubmapId{constraint_proto.submap_id().trajectory_id(),
-                   constraint_proto.submap_id().submap_index()});
     }
+    pose_graph_->AddSerializedConstraints(intra_constraints);
   } else {
     // When loading unfrozen trajectories, 'AddSerializedConstraints' will
     // take care of adding information about which nodes belong to which

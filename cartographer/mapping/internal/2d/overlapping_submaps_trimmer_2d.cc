@@ -145,8 +145,11 @@ std::map<SubmapId, common::Time> ComputeSubmapFreshness(
 std::vector<SubmapId> FindSubmapIdsToTrim(
     const SubmapCoverageGrid2D& coverage_grid,
     const std::set<SubmapId>& all_submap_ids, uint16 fresh_submaps_count,
-    uint16 min_covered_cells_count) {
-  std::map<SubmapId, uint16> submap_to_covered_cells_count;
+    int64 min_covered_cells_count) {
+  // Fork (2026-09-11): int64, not uint16. Outdoor submaps (200 m range,
+  // 0.1 m cells) cover far more than 65535 cells; the uint16 counter wrapped
+  // and large submaps were trimmed at random.
+  std::map<SubmapId, int64> submap_to_covered_cells_count;
   for (const auto& cell : coverage_grid.cells()) {
     std::vector<std::pair<SubmapId, common::Time>> submaps_per_cell(
         cell.second);
@@ -203,6 +206,11 @@ void OverlappingSubmapsTrimmer2D::Trim(Trimmable* pose_graph) {
       coverage_grid, all_submap_ids, fresh_submaps_count_,
       min_covered_area_ / common::Pow2(coverage_grid.resolution()));
   current_submap_count_ = submap_data.size() - submap_ids_to_remove.size();
+  // Fork (2026-09-11): report what a trim pass did; upstream is silent.
+  LOG(INFO) << "OverlappingSubmapsTrimmer2D: trimming "
+            << submap_ids_to_remove.size() << " of " << all_submap_ids.size()
+            << " finished submaps (" << submap_data.size()
+            << " total), keeping " << current_submap_count_;
   for (const SubmapId& id : submap_ids_to_remove) {
     pose_graph->TrimSubmap(id);
   }
