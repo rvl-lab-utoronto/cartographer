@@ -37,6 +37,26 @@ message TrajectoryBuilderOptions {
   bool pure_localization = 3 [deprecated = true];
   message PureLocalizationTrimmerOptions {
     int32 max_submaps_to_keep = 1;
+
+    // Fork (2026-09-21). Off-map retention. With keep_uncovered true the
+    // trimmer spares an old live submap whose ground the FROZEN (loaded) map
+    // does not already describe, so driving off the stored map behaves like
+    // ordinary SLAM while driving on it stays pure localization.
+    // Coverage is tested against a bitmap built ONCE from the frozen submaps
+    // at coverage_resolution, sampled with a stride, and kept live submaps are
+    // added to it so a second pass over the same new ground is still trimmed.
+    // This is deliberately NOT OverlappingSubmapsTrimmer2D, which rebuilds a
+    // std::map over every cell of every submap on every pass while holding the
+    // pose graph mutex and wedges the node on a map this size.
+    bool keep_uncovered = 2;
+    // Metres per cell of that bitmap. Coarse on purpose: the question is
+    // whether the ground is described at all, not where a wall is.
+    double coverage_resolution = 3;
+    // How far from previously-driven ground still counts as covered, in
+    // metres. Coverage is taken from the FROZEN trajectories' node positions
+    // dilated by this radius, which is a direct statement of "the robot has
+    // been here before", and is what localization actually depends on.
+    double coverage_radius = 4;
   }
   PureLocalizationTrimmerOptions pure_localization_trimmer = 6;
 

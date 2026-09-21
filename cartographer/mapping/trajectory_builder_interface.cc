@@ -35,6 +35,18 @@ void PopulatePureLocalizationTrimmerOptions(
       trajectory_builder_options->mutable_pure_localization_trimmer();
   options->set_max_submaps_to_keep(
       options_dictionary->GetInt("max_submaps_to_keep"));
+  // Fork (2026-09-21): optional, so existing luas parse unchanged.
+  if (options_dictionary->HasKey("keep_uncovered")) {
+    options->set_keep_uncovered(options_dictionary->GetBool("keep_uncovered"));
+  }
+  if (options_dictionary->HasKey("coverage_resolution")) {
+    options->set_coverage_resolution(
+        options_dictionary->GetDouble("coverage_resolution"));
+  }
+  if (options_dictionary->HasKey("coverage_radius")) {
+    options->set_coverage_radius(
+        options_dictionary->GetDouble("coverage_radius"));
+  }
 }
 
 void PopulatePoseGraphOdometryMotionFilterOptions(

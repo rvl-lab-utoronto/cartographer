@@ -66,9 +66,15 @@ void MaybeAddPureLocalizationTrimmer(
     return;
   }
   if (trajectory_options.has_pure_localization_trimmer()) {
+    // Fork (2026-09-21): the extra three are optional in the lua and default to
+    // off, so an existing config builds the stock trimmer unchanged.
+    const auto& trimmer_options =
+        trajectory_options.pure_localization_trimmer();
     pose_graph->AddTrimmer(absl::make_unique<PureLocalizationTrimmer>(
-        trajectory_id,
-        trajectory_options.pure_localization_trimmer().max_submaps_to_keep()));
+        trajectory_id, trimmer_options.max_submaps_to_keep(),
+        trimmer_options.keep_uncovered(),
+        trimmer_options.coverage_resolution(),
+        trimmer_options.coverage_radius()));
   }
 }
 

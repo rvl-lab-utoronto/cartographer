@@ -287,6 +287,8 @@ class PoseGraph3D : public PoseGraph {
         EXCLUSIVE_LOCKS_REQUIRED(parent_->mutex_) override;
     bool IsFinished(int trajectory_id) const override
         EXCLUSIVE_LOCKS_REQUIRED(parent_->mutex_);
+    bool IsFrozen(int trajectory_id) const override
+        EXCLUSIVE_LOCKS_REQUIRED(parent_->mutex_);
 
     void SetTrajectoryState(int trajectory_id, TrajectoryState state) override
         EXCLUSIVE_LOCKS_REQUIRED(parent_->mutex_);

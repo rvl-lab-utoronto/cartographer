@@ -1179,6 +1179,10 @@ bool PoseGraph3D::TrimmingHandle::IsFinished(const int trajectory_id) const {
   return parent_->IsTrajectoryFinished(trajectory_id);
 }
 
+bool PoseGraph3D::TrimmingHandle::IsFrozen(const int trajectory_id) const {
+  return parent_->IsTrajectoryFrozen(trajectory_id);
+}
+
 void PoseGraph3D::TrimmingHandle::SetTrajectoryState(int trajectory_id,
                                                      TrajectoryState state) {
   parent_->data_.trajectories_state[trajectory_id].state = state;

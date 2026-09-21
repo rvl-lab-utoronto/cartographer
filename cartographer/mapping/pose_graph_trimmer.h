@@ -17,6 +17,8 @@
 #ifndef CARTOGRAPHER_MAPPING_POSE_GRAPH_TRIMMER_H_
 #define CARTOGRAPHER_MAPPING_POSE_GRAPH_TRIMMER_H_
 
+#include <vector>
+
 #include "cartographer/mapping/id.h"
 #include "cartographer/mapping/pose_graph_interface.h"
 
@@ -47,6 +49,13 @@ class Trimmable {
   // Checks if the given trajectory is finished or not.
   virtual bool IsFinished(int trajectory_id) const = 0;
 
+  // Fork (2026-09-21): checks if the given trajectory is FROZEN, i.e. was
+  // loaded from a stored state rather than built live. FINISHED is a
+  // different thing and does not imply it, so IsFinished cannot answer this.
+  // Needed by OverlappingSubmapsTrimmer2D's localization mode, which must
+  // rank stored submaps above live ones and must never trim a stored one.
+  virtual bool IsFrozen(int trajectory_id) const = 0;
+
   // Sets the state for a specific trajectory.
   virtual void SetTrajectoryState(
       int trajectory_id, PoseGraphInterface::TrajectoryState state) = 0;
@@ -69,15 +78,34 @@ class PoseGraphTrimmer {
 class PureLocalizationTrimmer : public PoseGraphTrimmer {
  public:
   PureLocalizationTrimmer(int trajectory_id, int num_submaps_to_keep);
+  // Fork (2026-09-21): off-map retention. See the proto for what these mean.
+  PureLocalizationTrimmer(int trajectory_id, int num_submaps_to_keep,
+                          bool keep_uncovered, double coverage_resolution,
+                          double coverage_radius);
   ~PureLocalizationTrimmer() override {}
 
   void Trim(Trimmable* pose_graph) override;
   bool IsFinished() override;
 
  private:
+  // True when the stored map already describes this submap's ground, so
+  // dropping it loses nothing. Builds the coverage bitmap on first use and
+  // folds spared live submaps into it afterwards.
+  bool IsRedundant(const SubmapId& submap_id, Trimmable* pose_graph);
+  void MarkCovered(double x, double y);
+  bool IsCovered(double x, double y) const;
+
   const int trajectory_id_;
   int num_submaps_to_keep_;
   bool finished_ = false;
+
+  const bool keep_uncovered_ = false;
+  const double coverage_resolution_ = 1.0;
+  const double coverage_radius_ = 12.0;
+  bool coverage_built_ = false;
+  double origin_x_ = 0., origin_y_ = 0.;
+  int coverage_width_ = 0, coverage_height_ = 0;
+  std::vector<bool> covered_;
 };
 
 }  // namespace mapping

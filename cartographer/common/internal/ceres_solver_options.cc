@@ -29,6 +29,17 @@ proto::CeresSolverOptions CreateCeresSolverOptionsProto(
   proto.set_num_threads(parameter_dictionary->GetNonNegativeInt("num_threads"));
   CHECK_GT(proto.max_num_iterations(), 0);
   CHECK_GT(proto.num_threads(), 0);
+  // Optional keys: absent means "keep the current behavior", so existing
+  // configurations that do not mention them are unaffected.
+  if (parameter_dictionary->HasKey("minimizer_progress_to_stdout")) {
+    proto.set_minimizer_progress_to_stdout(
+        parameter_dictionary->GetBool("minimizer_progress_to_stdout"));
+  }
+  if (parameter_dictionary->HasKey("max_solver_time_in_seconds")) {
+    proto.set_max_solver_time_in_seconds(
+        parameter_dictionary->GetDouble("max_solver_time_in_seconds"));
+    CHECK_GT(proto.max_solver_time_in_seconds(), 0.);
+  }
   return proto;
 }
 
@@ -38,6 +49,10 @@ ceres::Solver::Options CreateCeresSolverOptions(
   options.use_nonmonotonic_steps = proto.use_nonmonotonic_steps();
   options.max_num_iterations = proto.max_num_iterations();
   options.num_threads = proto.num_threads();
+  options.minimizer_progress_to_stdout = proto.minimizer_progress_to_stdout();
+  if (proto.max_solver_time_in_seconds() > 0.) {
+    options.max_solver_time_in_seconds = proto.max_solver_time_in_seconds();
+  }
   return options;
 }
 

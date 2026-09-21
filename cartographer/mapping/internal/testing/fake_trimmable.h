@@ -96,6 +96,8 @@ class FakeTrimmable : public Trimmable {
 
   bool IsFinished(const int trajectory_id) const override { return false; }
 
+  bool IsFrozen(const int /*trajectory_id*/) const override { return false; }
+
   void SetTrajectoryState(
       int /*trajectory_id*/,
       PoseGraphInterface::TrajectoryState /*state*/) override {}

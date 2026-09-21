@@ -22,4 +22,10 @@ message CeresSolverOptions {
   bool use_nonmonotonic_steps = 1;
   int32 max_num_iterations = 2;
   int32 num_threads = 3;
+  // If true, Ceres logs per-iteration progress (cost, gradient, step size) to
+  // stdout. Defaults to false, i.e. the silent behavior.
+  bool minimizer_progress_to_stdout = 4;
+  // Wall clock budget for the solve. 0 (the default) means "unset", in which
+  // case the Ceres default (1e6 seconds) is kept.
+  double max_solver_time_in_seconds = 5;
 }
