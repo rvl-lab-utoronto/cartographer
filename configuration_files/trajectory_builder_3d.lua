@@ -12,11 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-MAX_3D_RANGE = 200. -- default 60.
+MAX_3D_RANGE = 60.
 INTENSITY_THRESHOLD = 40
 
 TRAJECTORY_BUILDER_3D = {
-  min_range = 0.3, -- default 1.
+  min_range = 1.,
   max_range = MAX_3D_RANGE,
   num_accumulated_range_data = 1,
   voxel_filter_size = 0.15,
@@ -24,7 +24,7 @@ TRAJECTORY_BUILDER_3D = {
   high_resolution_adaptive_voxel_filter = {
     max_length = 2.,
     min_num_points = 150,
-    max_range = 200.,
+    max_range = 15.,
   },
 
   low_resolution_adaptive_voxel_filter = {
@@ -50,7 +50,7 @@ TRAJECTORY_BUILDER_3D = {
         intensity_threshold = INTENSITY_THRESHOLD,
     },
     translation_weight = 5.,
-    rotation_weight = 4e-2, -- TO DO
+    rotation_weight = 4e2,
     only_optimize_yaw = false,
     ceres_solver_options = {
       use_nonmonotonic_steps = false,
@@ -62,17 +62,17 @@ TRAJECTORY_BUILDER_3D = {
   motion_filter = {
     max_time_seconds = 0.5,
     max_distance_meters = 0.1,
-    max_angle_radians = 0.004, -- TO DO -- Search this -- could be higher for lower sample rate
+    max_angle_radians = 0.004,
   },
 
   rotational_histogram_size = 120,
 
   -- TODO(schwoere,wohe): Remove this constant. This is only kept for ROS.
-  imu_gravity_time_constant = 1.,
+  imu_gravity_time_constant = 10.,
   pose_extrapolator = {
-    use_imu_based = false, -- confirm this
+    use_imu_based = false,
     constant_velocity = {
-      imu_gravity_time_constant = 1.,
+      imu_gravity_time_constant = 10.,
       pose_queue_duration = 0.001,
     },
     -- TODO(wohe): Tune these parameters on the example datasets.
@@ -80,27 +80,27 @@ TRAJECTORY_BUILDER_3D = {
       pose_queue_duration = 5.,
       gravity_constant = 9.806,
       pose_translation_weight = 1.,
-      pose_rotation_weight = 1., -- TO DO
+      pose_rotation_weight = 1.,
       imu_acceleration_weight = 1.,
       imu_rotation_weight = 1.,
       odometry_translation_weight = 1.,
       odometry_rotation_weight = 1.,
       solver_options = {
         use_nonmonotonic_steps = false;
-        max_num_iterations = 50;
-        num_threads = 12;
+        max_num_iterations = 10;
+        num_threads = 1;
       },
     },
   },
 
   submaps = {
-    high_resolution = 0.25,
-    high_resolution_max_range = 200.,
-    low_resolution = 2.0,
+    high_resolution = 0.10,
+    high_resolution_max_range = 20.,
+    low_resolution = 0.45,
     num_range_data = 160,
     range_data_inserter = {
-      hit_probability = 0.90,
-      miss_probability = 0.40,
+      hit_probability = 0.55,
+      miss_probability = 0.49,
       num_free_space_voxels = 2,
       intensity_threshold = INTENSITY_THRESHOLD,
     },
@@ -109,5 +109,5 @@ TRAJECTORY_BUILDER_3D = {
   -- When setting use_intensities to true, the intensity_cost_function_options_0
   -- parameter in ceres_scan_matcher has to be set up as well or otherwise
   -- CeresScanMatcher will CHECK-fail.
-  use_intensities = true, -- try this -- TO DO
+  use_intensities = false,
 }
