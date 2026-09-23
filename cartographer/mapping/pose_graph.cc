@@ -83,6 +83,17 @@ void PopulateOverlappingSubmapsTrimmerOptions2D(
       options_dictionary->GetDouble("min_covered_area"));
   options->set_min_added_submaps_count(
       options_dictionary->GetInt("min_added_submaps_count"));
+  // Fork (2026-09-22): optional inside/outside split, see the proto.
+  if (options_dictionary->HasKey("inside_polygon")) {
+    const std::vector<double> polygon =
+        options_dictionary->GetDictionary("inside_polygon")
+            ->GetArrayValuesAsDoubles();
+    CHECK_EQ(polygon.size() % 2, 0u)
+        << "inside_polygon must be a flat x0,y0,x1,y1,... list";
+    CHECK(polygon.empty() || polygon.size() >= 6)
+        << "inside_polygon needs at least 3 vertices";
+    for (const double v : polygon) options->add_inside_polygon(v);
+  }
 }
 
 proto::PoseGraphOptions CreatePoseGraphOptions(

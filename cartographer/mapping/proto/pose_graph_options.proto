@@ -60,6 +60,16 @@ message PoseGraphOptions {
     int32 fresh_submaps_count = 1;
     double min_covered_area = 2;
     int32 min_added_submaps_count = 3;
+    // Fork (2026-09-22): a submap whose ORIGIN (global pose translation) lies
+    // inside this polygon belongs to the "inside" population; all others to
+    // "outside". Coverage is judged within a population only, so an inside
+    // submap never counts as covering ground an outside submap describes and
+    // vice versa. Made for the Myhal building at the campus map origin: its
+    // glass walls reflect the LiDAR, so submaps started indoors paint
+    // phantom structure over the real outdoor ground and would otherwise
+    // out-fresh and evict the genuine outdoor submaps there. Flat list
+    // x0,y0,x1,y1,... in the global frame; empty = one population (upstream).
+    repeated double inside_polygon = 4;
   }
 
   // Instantiates the 'OverlappingSubmapsTrimmer2d' which trims submaps from the

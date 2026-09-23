@@ -52,16 +52,20 @@ class SubmapCoverageGrid2D {
 // Iterates over every cell in a submap, transforms the center of the cell to
 // the global frame and then adds the submap id and the timestamp of the most
 // recent range data insertion into the global grid.
+// Fork (2026-09-22): 'population', when non-null, restricts the grid to those
+// submap ids, so coverage is judged within one population only.
 std::set<SubmapId> AddSubmapsToSubmapCoverageGrid2D(
     const std::map<SubmapId, common::Time>& submap_freshness,
     const MapById<SubmapId, PoseGraphInterface::SubmapData>& submap_data,
-    SubmapCoverageGrid2D* coverage_grid) {
+    SubmapCoverageGrid2D* coverage_grid,
+    const std::set<SubmapId>* population = nullptr) {
   std::set<SubmapId> all_submap_ids;
 
   for (const auto& submap : submap_data) {
     auto freshness = submap_freshness.find(submap.id);
     if (freshness == submap_freshness.end()) continue;
     if (!submap.data.submap->insertion_finished()) continue;
+    if (population != nullptr && population->count(submap.id) == 0) continue;
     all_submap_ids.insert(submap.id);
     const Grid2D& grid =
         *std::static_pointer_cast<const Submap2D>(submap.data.submap)->grid();
@@ -184,6 +188,22 @@ std::vector<SubmapId> FindSubmapIdsToTrim(
   return result;
 }
 
+// Even-odd rule point-in-polygon on a flat x0,y0,x1,y1,... vertex list.
+bool InsidePolygon(const std::vector<double>& polygon, const double x,
+                   const double y) {
+  const size_t n = polygon.size() / 2;
+  bool inside = false;
+  for (size_t i = 0, j = n - 1; i < n; j = i++) {
+    const double xi = polygon[2 * i], yi = polygon[2 * i + 1];
+    const double xj = polygon[2 * j], yj = polygon[2 * j + 1];
+    if ((yi > y) != (yj > y) &&
+        x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 }  // namespace
 
 void OverlappingSubmapsTrimmer2D::Trim(Trimmable* pose_graph) {
@@ -196,19 +216,50 @@ void OverlappingSubmapsTrimmer2D::Trim(Trimmable* pose_graph) {
       std::static_pointer_cast<const Submap2D>(submap_data.begin()->data.submap)
           ->grid()
           ->limits();
-  SubmapCoverageGrid2D coverage_grid(first_submap_map_limits);
   const std::map<SubmapId, common::Time> submap_freshness =
       ComputeSubmapFreshness(submap_data, pose_graph->GetTrajectoryNodes(),
                              pose_graph->GetConstraints());
-  const std::set<SubmapId> all_submap_ids = AddSubmapsToSubmapCoverageGrid2D(
-      submap_freshness, submap_data, &coverage_grid);
-  const std::vector<SubmapId> submap_ids_to_remove = FindSubmapIdsToTrim(
-      coverage_grid, all_submap_ids, fresh_submaps_count_,
-      min_covered_area_ / common::Pow2(coverage_grid.resolution()));
+
+  // Fork (2026-09-22): with an inside_polygon, submaps are split by where
+  // their ORIGIN lies and each population is trimmed against itself only.
+  // Without one there is a single population and this is upstream behaviour.
+  std::vector<std::set<SubmapId>> populations;
+  if (inside_polygon_.empty()) {
+    populations.resize(1);
+    for (const auto& submap : submap_data) populations[0].insert(submap.id);
+  } else {
+    populations.resize(2);
+    for (const auto& submap : submap_data) {
+      const Eigen::Vector3d& origin = submap.data.pose.translation();
+      populations[InsidePolygon(inside_polygon_, origin.x(), origin.y()) ? 0
+                                                                          : 1]
+          .insert(submap.id);
+    }
+  }
+
+  std::vector<SubmapId> submap_ids_to_remove;
+  size_t finished_count = 0;
+  for (size_t p = 0; p < populations.size(); ++p) {
+    SubmapCoverageGrid2D coverage_grid(first_submap_map_limits);
+    const std::set<SubmapId> population_ids = AddSubmapsToSubmapCoverageGrid2D(
+        submap_freshness, submap_data, &coverage_grid, &populations[p]);
+    const std::vector<SubmapId> to_remove = FindSubmapIdsToTrim(
+        coverage_grid, population_ids, fresh_submaps_count_,
+        min_covered_area_ / common::Pow2(coverage_grid.resolution()));
+    if (populations.size() > 1) {
+      LOG(INFO) << "OverlappingSubmapsTrimmer2D: population "
+                << (p == 0 ? "INSIDE" : "OUTSIDE") << " inside_polygon: "
+                << populations[p].size() << " submaps, " << population_ids.size()
+                << " finished, trimming " << to_remove.size();
+    }
+    finished_count += population_ids.size();
+    submap_ids_to_remove.insert(submap_ids_to_remove.end(), to_remove.begin(),
+                                to_remove.end());
+  }
   current_submap_count_ = submap_data.size() - submap_ids_to_remove.size();
   // Fork (2026-09-11): report what a trim pass did; upstream is silent.
   LOG(INFO) << "OverlappingSubmapsTrimmer2D: trimming "
-            << submap_ids_to_remove.size() << " of " << all_submap_ids.size()
+            << submap_ids_to_remove.size() << " of " << finished_count
             << " finished submaps (" << submap_data.size()
             << " total), keeping " << current_submap_count_;
   for (const SubmapId& id : submap_ids_to_remove) {

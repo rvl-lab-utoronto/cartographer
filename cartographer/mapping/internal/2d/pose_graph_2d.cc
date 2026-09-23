@@ -62,7 +62,9 @@ PoseGraph2D::PoseGraph2D(
     AddTrimmer(absl::make_unique<OverlappingSubmapsTrimmer2D>(
         trimmer_options.fresh_submaps_count(),
         trimmer_options.min_covered_area(),
-        trimmer_options.min_added_submaps_count()));
+        trimmer_options.min_added_submaps_count(),
+        std::vector<double>(trimmer_options.inside_polygon().begin(),
+                            trimmer_options.inside_polygon().end())));
   }
 }
 
