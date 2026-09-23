@@ -57,6 +57,11 @@ message TrajectoryBuilderOptions {
     // dilated by this radius, which is a direct statement of "the robot has
     // been here before", and is what localization actually depends on.
     double coverage_radius = 4;
+    // Dilation, in metres, applied when a KEPT live submap is folded into the
+    // coverage. Decides "did this run already map this exact ground", so it
+    // is a path width (3 m), not coverage_radius: with the large radius the
+    // next consecutive submap was always redundant (bug, 2026-09-22).
+    double keep_radius = 5;
   }
   PureLocalizationTrimmerOptions pure_localization_trimmer = 6;
 

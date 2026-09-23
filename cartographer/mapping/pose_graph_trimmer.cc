@@ -34,17 +34,19 @@ PureLocalizationTrimmer::PureLocalizationTrimmer(const int trajectory_id,
 PureLocalizationTrimmer::PureLocalizationTrimmer(
     const int trajectory_id, const int num_submaps_to_keep,
     const bool keep_uncovered, const double coverage_resolution,
-    const double coverage_radius)
+    const double coverage_radius, const double keep_radius)
     : trajectory_id_(trajectory_id),
       num_submaps_to_keep_(num_submaps_to_keep),
       keep_uncovered_(keep_uncovered),
       coverage_resolution_(coverage_resolution > 0. ? coverage_resolution : 1.),
-      coverage_radius_(coverage_radius > 0. ? coverage_radius : 12.) {
+      coverage_radius_(coverage_radius > 0. ? coverage_radius : 12.),
+      keep_radius_(keep_radius > 0. ? keep_radius : 3.) {
   CHECK_GE(num_submaps_to_keep, 2) << "Cannot trim with less than 2 submaps";
 }
 
-void PureLocalizationTrimmer::MarkCovered(const double x, const double y) {
-  const int r = static_cast<int>(coverage_radius_ / coverage_resolution_);
+void PureLocalizationTrimmer::MarkCovered(const double x, const double y,
+                                          const double radius) {
+  const int r = static_cast<int>(radius / coverage_resolution_);
   const int cx = static_cast<int>((x - origin_x_) / coverage_resolution_);
   const int cy = static_cast<int>((y - origin_y_) / coverage_resolution_);
   for (int dy = -r; dy <= r; ++dy) {
@@ -131,7 +133,7 @@ bool PureLocalizationTrimmer::IsRedundant(const SubmapId& submap_id,
     for (const auto& node : nodes) {
       if (!pose_graph->IsFrozen(node.id.trajectory_id)) continue;
       const Eigen::Vector3d t = node.data.global_pose.translation();
-      MarkCovered(t.x(), t.y());
+      MarkCovered(t.x(), t.y(), coverage_radius_);
     }
     LOG(INFO) << "PureLocalizationTrimmer: coverage from " << n_frozen
               << " frozen nodes, " << coverage_width_ << "x" << coverage_height_
@@ -143,30 +145,29 @@ bool PureLocalizationTrimmer::IsRedundant(const SubmapId& submap_id,
   // Judge the submap by the nodes inserted into it, not by its origin: a submap
   // straddling the edge of the stored map is kept, which is the conservative
   // direction.
-  bool any_uncovered = false;
+  // One pass over the constraints: collect this submap's node positions.
+  std::vector<Eigen::Vector2d> positions;
   for (const auto& constraint : pose_graph->GetConstraints()) {
     if (constraint.tag != PoseGraphInterface::Constraint::INTRA_SUBMAP) continue;
     if (!(constraint.submap_id == submap_id)) continue;
     const auto it = nodes.find(constraint.node_id);
     if (it == nodes.end()) continue;
-    const Eigen::Vector3d t = it->data.global_pose.translation();
-    if (!IsCovered(t.x(), t.y())) {
-      any_uncovered = true;
-      break;
-    }
+    positions.emplace_back(it->data.global_pose.translation().head<2>());
+  }
+  bool any_uncovered = false;
+  for (const auto& p : positions) {
+    if (!IsCovered(p.x(), p.y())) { any_uncovered = true; break; }
   }
   if (!any_uncovered) return true;
 
-  for (const auto& constraint : pose_graph->GetConstraints()) {
-    if (constraint.tag != PoseGraphInterface::Constraint::INTRA_SUBMAP) continue;
-    if (!(constraint.submap_id == submap_id)) continue;
-    const auto it = nodes.find(constraint.node_id);
-    if (it == nodes.end()) continue;
-    const Eigen::Vector3d t = it->data.global_pose.translation();
-    MarkCovered(t.x(), t.y());
-  }
+  // Kept for the run (Trim never re-tests it). Fold its ground in with the
+  // SMALL radius so a later submap that merely continues along the same new
+  // path is kept too, while one that re-drives this exact ground is trimmed.
+  spared_.insert(submap_id);
+  for (const auto& p : positions) MarkCovered(p.x(), p.y(), keep_radius_);
   LOG(INFO) << "PureLocalizationTrimmer: keeping live submap " << submap_id
-            << ", it reaches ground the stored map does not cover";
+            << " (" << positions.size() << " nodes), it reaches ground the stored "
+            << "map does not cover; " << spared_.size() << " kept so far";
   return false;
 }
 
@@ -183,7 +184,8 @@ void PureLocalizationTrimmer::Trim(Trimmable* const pose_graph) {
     // Skipped entirely when the trajectory is finished, where num_submaps_to_
     // keep_ is 0 and everything must go.
     if (keep_uncovered_ && num_submaps_to_keep_ > 0 &&
-        !IsRedundant(submap_ids.at(i), pose_graph)) {
+        (spared_.count(submap_ids.at(i)) ||
+         !IsRedundant(submap_ids.at(i), pose_graph))) {
       continue;
     }
     pose_graph->TrimSubmap(submap_ids.at(i));

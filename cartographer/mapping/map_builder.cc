@@ -74,7 +74,8 @@ void MaybeAddPureLocalizationTrimmer(
         trajectory_id, trimmer_options.max_submaps_to_keep(),
         trimmer_options.keep_uncovered(),
         trimmer_options.coverage_resolution(),
-        trimmer_options.coverage_radius()));
+        trimmer_options.coverage_radius(),
+        trimmer_options.keep_radius()));
   }
 }
 

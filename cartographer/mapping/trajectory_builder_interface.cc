@@ -47,6 +47,9 @@ void PopulatePureLocalizationTrimmerOptions(
     options->set_coverage_radius(
         options_dictionary->GetDouble("coverage_radius"));
   }
+  if (options_dictionary->HasKey("keep_radius")) {
+    options->set_keep_radius(options_dictionary->GetDouble("keep_radius"));
+  }
 }
 
 void PopulatePoseGraphOdometryMotionFilterOptions(

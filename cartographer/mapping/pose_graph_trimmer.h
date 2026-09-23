@@ -17,6 +17,7 @@
 #ifndef CARTOGRAPHER_MAPPING_POSE_GRAPH_TRIMMER_H_
 #define CARTOGRAPHER_MAPPING_POSE_GRAPH_TRIMMER_H_
 
+#include <set>
 #include <vector>
 
 #include "cartographer/mapping/id.h"
@@ -81,7 +82,7 @@ class PureLocalizationTrimmer : public PoseGraphTrimmer {
   // Fork (2026-09-21): off-map retention. See the proto for what these mean.
   PureLocalizationTrimmer(int trajectory_id, int num_submaps_to_keep,
                           bool keep_uncovered, double coverage_resolution,
-                          double coverage_radius);
+                          double coverage_radius, double keep_radius);
   ~PureLocalizationTrimmer() override {}
 
   void Trim(Trimmable* pose_graph) override;
@@ -92,7 +93,7 @@ class PureLocalizationTrimmer : public PoseGraphTrimmer {
   // dropping it loses nothing. Builds the coverage bitmap on first use and
   // folds spared live submaps into it afterwards.
   bool IsRedundant(const SubmapId& submap_id, Trimmable* pose_graph);
-  void MarkCovered(double x, double y);
+  void MarkCovered(double x, double y, double radius);
   bool IsCovered(double x, double y) const;
 
   const int trajectory_id_;
@@ -102,6 +103,14 @@ class PureLocalizationTrimmer : public PoseGraphTrimmer {
   const bool keep_uncovered_ = false;
   const double coverage_resolution_ = 1.0;
   const double coverage_radius_ = 12.0;
+  // Dilation used when a KEPT live submap is folded into the coverage. Small
+  // on purpose: it decides whether a later submap re-drives the same new
+  // ground, not whether it is near the old map. Using coverage_radius here
+  // made the next consecutive submap (6 m on) redundant every time.
+  const double keep_radius_ = 3.0;
+  // Submaps spared once are spared for the run. Re-testing them found their
+  // own folded-in nodes and trimmed them on the next pass (bug, 2026-09-22).
+  std::set<SubmapId> spared_;
   bool coverage_built_ = false;
   double origin_x_ = 0., origin_y_ = 0.;
   int coverage_width_ = 0, coverage_height_ = 0;
