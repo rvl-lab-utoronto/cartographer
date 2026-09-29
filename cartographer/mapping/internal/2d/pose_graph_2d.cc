@@ -1358,6 +1358,22 @@ void PoseGraph2D::TrimmingHandle::TrimSubmap(const SubmapId& submap_id) {
   parent_->data_.submap_data.Trim(submap_id);
   parent_->constraint_builder_.DeleteScanMatcher(submap_id);
   parent_->optimization_problem_->TrimSubmap(submap_id);
+  // Fork (2026-09-24): also drop the submap from the LAST optimization's pose
+  // table. Upstream leaves 'global_submap_poses_2d' untouched until the next
+  // RunOptimization replaces it wholesale, but that same RunOptimization first
+  // calls ComputeLocalToGlobalTransform(data_.global_submap_poses_2d, ...) per
+  // trajectory, which takes the trajectory's LAST entry from this stale table
+  // and does data_.submap_data.at() on it. Trimming a finished trajectory's
+  // final submap is routine for the overlapping trimmer on a multi-day map (an
+  // old trajectory's last submap loses the freshness contest to a later pass
+  // over the same ground), and it threw std::out_of_range and aborted the
+  // v2_n01 trim pass (54 trajectories). With the entry gone the lookup falls
+  // back to the last surviving submap, or to the initial-pose/identity branch
+  // if none is left. No effect on live pure localization: that trimmer only
+  // ever removes a trajectory's OLDEST submaps, never its last.
+  if (parent_->data_.global_submap_poses_2d.Contains(submap_id)) {
+    parent_->data_.global_submap_poses_2d.Trim(submap_id);
+  }
 
   // We have one submap less, update the gauge metrics.
   kDeletedSubmapsMetric->Increment();
