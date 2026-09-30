@@ -59,6 +59,11 @@ message ConstraintBuilderOptions {
   double initial_pose_linear_search_window = 16;
   double initial_pose_angular_search_window = 17;
   double initial_pose_min_score = 18;
+  // 3D only: bootstrap z half width (meters). The click gives x, y and yaw;
+  // z comes from the map, so this is usually smaller than the xy window.
+  // 0 (or absent from the lua) uses fast_correlative_scan_matcher_3d's
+  // linear_z_search_window.
+  double initial_pose_linear_z_search_window = 19;
 
   // Options for the internally used scan matchers.
   mapping.scan_matching.proto.FastCorrelativeScanMatcherOptions2D

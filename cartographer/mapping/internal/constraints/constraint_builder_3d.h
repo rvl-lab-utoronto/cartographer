@@ -76,11 +76,15 @@ class ConstraintBuilder3D {
   //
   // The pointees of 'submap' and 'compressed_point_cloud' must stay valid until
   // all computations are finished.
+  // 'bootstrap': skip the per-submap sampler and match with the
+  // initial_pose_* window and score floor (trajectory just started from an
+  // initial pose, not yet tied to the map). Fork, as ConstraintBuilder2D.
   void MaybeAddConstraint(const SubmapId& submap_id, const Submap3D* submap,
                           const NodeId& node_id,
                           const TrajectoryNode::Data* const constant_data,
                           const transform::Rigid3d& global_node_pose,
-                          const transform::Rigid3d& global_submap_pose);
+                          const transform::Rigid3d& global_submap_pose,
+                          bool bootstrap = false);
 
   // Schedules exploring a new constraint between 'submap' identified by
   // 'submap_id' and the 'compressed_point_cloud' for 'node_id'.
@@ -132,7 +136,7 @@ class ConstraintBuilder3D {
   // constraint.
   // As output, it may create a new Constraint in 'constraint'.
   void ComputeConstraint(const SubmapId& submap_id, const NodeId& node_id,
-                         bool match_full_submap,
+                         bool match_full_submap, bool bootstrap,
                          const TrajectoryNode::Data* const constant_data,
                          const transform::Rigid3d& global_node_pose,
                          const transform::Rigid3d& global_submap_pose,

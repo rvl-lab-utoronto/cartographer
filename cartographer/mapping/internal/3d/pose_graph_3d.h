@@ -195,9 +195,11 @@ class PoseGraph3D : public PoseGraph {
       std::vector<std::shared_ptr<const Submap3D>> insertion_submaps,
       bool newly_finished_submap) LOCKS_EXCLUDED(mutex_);
 
-  // Computes constraints for a node and submap pair.
-  void ComputeConstraint(const NodeId& node_id, const SubmapId& submap_id)
-      LOCKS_EXCLUDED(mutex_);
+  // Computes constraints for a node and submap pair. 'bootstrap': the node's
+  // trajectory was just started from an initial pose and is not yet tied to
+  // another trajectory, match unsampled with the initial_pose_* window.
+  void ComputeConstraint(const NodeId& node_id, const SubmapId& submap_id,
+                         bool bootstrap = false) LOCKS_EXCLUDED(mutex_);
 
   // Deletes trajectories waiting for deletion. Must not be called during
   // constraint search.
@@ -239,6 +241,11 @@ class PoseGraph3D : public PoseGraph {
   // Updates the trajectory connectivity structure with a new constraint.
   void UpdateTrajectoryConnectivity(const Constraint& constraint)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  // Connect 'trajectory_id' to 'other_trajectory_id' and, if that one is
+  // frozen, to every other frozen trajectory as well (fork, as PoseGraph2D).
+  void ConnectAlsoToAllFrozen(int trajectory_id, int other_trajectory_id,
+                              common::Time time)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   const proto::PoseGraphOptions options_;
   GlobalSlamOptimizationCallback global_slam_optimization_callback_;
@@ -255,6 +262,12 @@ class PoseGraph3D : public PoseGraph {
 
   // Number of nodes added since last loop closure.
   int num_nodes_since_last_loop_closure_ GUARDED_BY(mutex_) = 0;
+
+  // Trajectories started from an initial pose that are still in the bootstrap
+  // search (constraint_builder_options.initial_pose_*): trajectory id to the
+  // number of bootstrap nodes left. Erased at the first constraint to another
+  // trajectory or when the count runs out. Fork, as PoseGraph2D.
+  std::map<int, int> bootstrap_nodes_left_ GUARDED_BY(mutex_);
 
   // Current optimization problem.
   std::unique_ptr<optimization::OptimizationProblem3D> optimization_problem_;

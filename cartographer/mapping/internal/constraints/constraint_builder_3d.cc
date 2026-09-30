@@ -80,12 +80,13 @@ void ConstraintBuilder3D::MaybeAddConstraint(
     const SubmapId& submap_id, const Submap3D* const submap,
     const NodeId& node_id, const TrajectoryNode::Data* const constant_data,
     const transform::Rigid3d& global_node_pose,
-    const transform::Rigid3d& global_submap_pose) {
+    const transform::Rigid3d& global_submap_pose, const bool bootstrap) {
   if ((global_node_pose.translation() - global_submap_pose.translation())
           .norm() > options_.max_constraint_distance()) {
     return;
   }
-  if (!per_submap_sampler_
+  if (!bootstrap &&
+      !per_submap_sampler_
            .emplace(std::piecewise_construct, std::forward_as_tuple(submap_id),
                     std::forward_as_tuple(options_.sampling_ratio()))
            .first->second.Pulse()) {
@@ -104,7 +105,8 @@ void ConstraintBuilder3D::MaybeAddConstraint(
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
     ComputeConstraint(submap_id, node_id, false, /* match_full_submap */
-                      constant_data, global_node_pose, global_submap_pose,
+                      bootstrap, constant_data, global_node_pose,
+                      global_submap_pose,
                       *scan_matcher, constraint);
   });
   constraint_task->AddDependency(scan_matcher->creation_task_handle);
@@ -130,6 +132,7 @@ void ConstraintBuilder3D::MaybeAddGlobalConstraint(
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
     ComputeConstraint(submap_id, node_id, true, /* match_full_submap */
+                      false, /* bootstrap */
                       constant_data,
                       transform::Rigid3d::Rotation(global_node_rotation),
                       transform::Rigid3d::Rotation(global_submap_rotation),
@@ -199,7 +202,7 @@ ConstraintBuilder3D::DispatchScanMatcherConstruction(const SubmapId& submap_id,
 
 void ConstraintBuilder3D::ComputeConstraint(
     const SubmapId& submap_id, const NodeId& node_id, bool match_full_submap,
-    const TrajectoryNode::Data* const constant_data,
+    const bool bootstrap, const TrajectoryNode::Data* const constant_data,
     const transform::Rigid3d& global_node_pose,
     const transform::Rigid3d& global_submap_pose,
     const SubmapScanMatcher& submap_scan_matcher,
@@ -230,6 +233,30 @@ void ConstraintBuilder3D::ComputeConstraint(
       kGlobalConstraintRotationalScoresMetric->Observe(
           match_result->rotational_score);
       kGlobalConstraintLowResolutionScoresMetric->Observe(
+          match_result->low_resolution_score);
+    } else {
+      return;
+    }
+  } else if (bootstrap) {
+    kConstraintsSearchedMetric->Increment();
+    const double z_window =
+        options_.initial_pose_linear_z_search_window() > 0.
+            ? options_.initial_pose_linear_z_search_window()
+            : options_.fast_correlative_scan_matcher_options_3d()
+                  .linear_z_search_window();
+    match_result =
+        submap_scan_matcher.fast_correlative_scan_matcher->MatchWithWindow(
+            global_node_pose, global_submap_pose, *constant_data,
+            options_.initial_pose_linear_search_window(), z_window,
+            options_.initial_pose_angular_search_window(),
+            options_.initial_pose_min_score());
+    if (match_result != nullptr) {
+      CHECK_GT(match_result->score, options_.initial_pose_min_score());
+      kConstraintsFoundMetric->Increment();
+      kConstraintScoresMetric->Observe(match_result->score);
+      kConstraintRotationalScoresMetric->Observe(
+          match_result->rotational_score);
+      kConstraintLowResolutionScoresMetric->Observe(
           match_result->low_resolution_score);
     } else {
       return;

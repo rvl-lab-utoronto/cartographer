@@ -48,6 +48,10 @@ proto::ConstraintBuilderOptions CreateConstraintBuilderOptions(
       parameter_dictionary->GetDouble("initial_pose_angular_search_window"));
   options.set_initial_pose_min_score(
       parameter_dictionary->GetDouble("initial_pose_min_score"));
+  if (parameter_dictionary->HasKey("initial_pose_linear_z_search_window")) {
+    options.set_initial_pose_linear_z_search_window(parameter_dictionary->GetDouble(
+        "initial_pose_linear_z_search_window"));
+  }
   *options.mutable_fast_correlative_scan_matcher_options() =
       scan_matching::CreateFastCorrelativeScanMatcherOptions2D(
           parameter_dictionary->GetDictionary("fast_correlative_scan_matcher")

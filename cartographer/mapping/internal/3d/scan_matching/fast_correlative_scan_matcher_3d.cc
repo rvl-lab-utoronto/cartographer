@@ -144,6 +144,27 @@ FastCorrelativeScanMatcher3D::Match(
 }
 
 std::unique_ptr<FastCorrelativeScanMatcher3D::Result>
+FastCorrelativeScanMatcher3D::MatchWithWindow(
+    const transform::Rigid3d& global_node_pose,
+    const transform::Rigid3d& global_submap_pose,
+    const TrajectoryNode::Data& constant_data,
+    const double linear_xy_search_window, const double linear_z_search_window,
+    const double angular_search_window, const float min_score) const {
+  const auto low_resolution_matcher = scan_matching::CreateLowResolutionMatcher(
+      low_resolution_hybrid_grid_, &constant_data.low_resolution_point_cloud);
+  const SearchParameters search_parameters{
+      common::RoundToInt(linear_xy_search_window / resolution_),
+      common::RoundToInt(linear_z_search_window / resolution_),
+      angular_search_window, &low_resolution_matcher};
+  return MatchWithSearchParameters(
+      search_parameters, global_node_pose.cast<float>(),
+      global_submap_pose.cast<float>(),
+      constant_data.high_resolution_point_cloud,
+      constant_data.rotational_scan_matcher_histogram,
+      constant_data.gravity_alignment, min_score);
+}
+
+std::unique_ptr<FastCorrelativeScanMatcher3D::Result>
 FastCorrelativeScanMatcher3D::MatchFullSubmap(
     const Eigen::Quaterniond& global_node_rotation,
     const Eigen::Quaterniond& global_submap_rotation,

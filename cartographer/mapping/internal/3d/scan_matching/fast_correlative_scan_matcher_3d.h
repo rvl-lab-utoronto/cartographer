@@ -91,6 +91,16 @@ class FastCorrelativeScanMatcher3D {
                                 const TrajectoryNode::Data& constant_data,
                                 float min_score) const;
 
+  // As Match(), but with the given search window (half widths, meters and
+  // radians) instead of the configured one (fork, bootstrap after an initial
+  // pose, see ConstraintBuilderOptions.initial_pose_*).
+  std::unique_ptr<Result> MatchWithWindow(
+      const transform::Rigid3d& global_node_pose,
+      const transform::Rigid3d& global_submap_pose,
+      const TrajectoryNode::Data& constant_data, double linear_xy_search_window,
+      double linear_z_search_window, double angular_search_window,
+      float min_score) const;
+
   // Aligns the node with the given 'constant_data' within the 'hybrid_grid'
   // given rotations which are expected to be approximately gravity aligned.
   // 'Result' is only returned if a score above 'min_score' (excluding equality)

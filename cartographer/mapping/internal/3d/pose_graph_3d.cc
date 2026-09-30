@@ -25,6 +25,7 @@
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <set>
 #include <string>
 
 #include "Eigen/Eigenvalues"
@@ -71,10 +72,18 @@ std::vector<SubmapId> PoseGraph3D::InitializeGlobalSubmapPoses(
     // If we don't already have an entry for the first submap, add one.
     if (submap_data.SizeOfTrajectoryOrZero(trajectory_id) == 0) {
       if (data_.initial_trajectory_poses.count(trajectory_id) > 0) {
-        data_.trajectory_connectivity_state.Connect(
+        ConnectAlsoToAllFrozen(
             trajectory_id,
             data_.initial_trajectory_poses.at(trajectory_id).to_trajectory_id,
             time);
+        const int bootstrap_nodes =
+            options_.constraint_builder_options().initial_pose_num_nodes();
+        if (bootstrap_nodes > 0) {
+          bootstrap_nodes_left_[trajectory_id] = bootstrap_nodes;
+          LOG(INFO) << "Trajectory " << trajectory_id
+                    << ": bootstrap search from the initial pose for up to "
+                    << bootstrap_nodes << " nodes.";
+        }
       }
       optimization_problem_->AddSubmap(
           trajectory_id, ComputeLocalToGlobalTransform(
@@ -247,7 +256,8 @@ void PoseGraph3D::AddLandmarkData(int trajectory_id,
 }
 
 void PoseGraph3D::ComputeConstraint(const NodeId& node_id,
-                                    const SubmapId& submap_id) {
+                                    const SubmapId& submap_id,
+                                    const bool bootstrap) {
   const transform::Rigid3d global_node_pose =
       optimization_problem_->node_data().at(node_id).global_pose;
 
@@ -295,9 +305,10 @@ void PoseGraph3D::ComputeConstraint(const NodeId& node_id,
   }
 
   if (maybe_add_local_constraint) {
-    constraint_builder_.MaybeAddConstraint(submap_id, submap, node_id,
-                                           constant_data, global_node_pose,
-                                           global_submap_pose);
+    constraint_builder_.MaybeAddConstraint(
+        submap_id, submap, node_id, constant_data, global_node_pose,
+        global_submap_pose,
+        bootstrap && submap_id.trajectory_id != node_id.trajectory_id);
   } else if (maybe_add_global_constraint) {
     constraint_builder_.MaybeAddGlobalConstraint(
         submap_id, submap, node_id, constant_data, global_node_pose.rotation(),
@@ -363,16 +374,48 @@ WorkItem::Result PoseGraph3D::ComputeConstraintsForNode(
     }
   }
 
+  bool bootstrap = false;
+  {
+    absl::MutexLock locker(&mutex_);
+    auto it = bootstrap_nodes_left_.find(node_id.trajectory_id);
+    if (it != bootstrap_nodes_left_.end()) {
+      bootstrap = true;
+      if (--it->second <= 0) {
+        LOG(WARNING) << "Trajectory " << node_id.trajectory_id
+                     << ": bootstrap search ended without a constraint to "
+                        "the map, falling back to the sampled search.";
+        bootstrap_nodes_left_.erase(it);
+      }
+    }
+  }
   for (const auto& submap_id : finished_submap_ids) {
-    ComputeConstraint(node_id, submap_id);
+    ComputeConstraint(node_id, submap_id, bootstrap);
   }
 
   if (newly_finished_submap) {
     const SubmapId newly_finished_submap_id = submap_ids.front();
     // We have a new completed submap, so we look into adding constraints for
     // old nodes.
+    // Fork (2026-09-30): not the nodes of FROZEN trajectories. Against a
+    // loaded map this loop walks every stored node (222k on the 3D campus
+    // map) and schedules a 3D match for each one near the new live submap:
+    // measured live, 105-118 matches per finished submap, the pose graph
+    // queue at 110-154 items and the node at 400 % CPU for the burst. Those
+    // constraints tie frozen nodes to a live submap that pure localization
+    // trims a few submaps later, deleting them; the live nodes' own
+    // constraints to the frozen submaps already carry the map tie.
+    std::set<int> frozen_trajectory_ids;
+    {
+      absl::MutexLock locker(&mutex_);
+      for (const auto& it : data_.trajectories_state) {
+        if (it.second.state == TrajectoryState::FROZEN) {
+          frozen_trajectory_ids.insert(it.first);
+        }
+      }
+    }
     for (const auto& node_id_data : optimization_problem_->node_data()) {
       const NodeId& node_id = node_id_data.id;
+      if (frozen_trajectory_ids.count(node_id.trajectory_id) != 0) continue;
       if (newly_finished_submap_node_ids.count(node_id) == 0) {
         ComputeConstraint(node_id, newly_finished_submap_id);
       }
@@ -381,6 +424,11 @@ WorkItem::Result PoseGraph3D::ComputeConstraintsForNode(
   constraint_builder_.NotifyEndOfNode();
   absl::MutexLock locker(&mutex_);
   ++num_nodes_since_last_loop_closure_;
+  // Bootstrap: optimize after every node so a found constraint is applied
+  // (map->odom corrected) as soon as its matches finish.
+  if (bootstrap) {
+    return WorkItem::Result::kRunOptimization;
+  }
   if (options_.optimize_every_n_nodes() > 0 &&
       num_nodes_since_last_loop_closure_ > options_.optimize_every_n_nodes()) {
     return WorkItem::Result::kRunOptimization;
@@ -406,9 +454,30 @@ void PoseGraph3D::UpdateTrajectoryConnectivity(const Constraint& constraint) {
   CHECK_EQ(constraint.tag, PoseGraphInterface::Constraint::INTER_SUBMAP);
   const common::Time time =
       GetLatestNodeTime(constraint.node_id, constraint.submap_id);
-  data_.trajectory_connectivity_state.Connect(
-      constraint.node_id.trajectory_id, constraint.submap_id.trajectory_id,
-      time);
+  ConnectAlsoToAllFrozen(constraint.node_id.trajectory_id,
+                         constraint.submap_id.trajectory_id, time);
+}
+
+// Fork: a connection to one FROZEN trajectory counts as a connection to every
+// frozen trajectory; they are rigid to each other. Port of PoseGraph2D's
+// (2026-09-08, see there for the measured failure): ComputeConstraint picks
+// local vs global search per (node trajectory, submap trajectory) PAIR, so a
+// live trajectory tied to one frozen trajectory otherwise stays "never
+// connected" to the others. Moot while global_constraint_search_after_n_seconds
+// is 1e11 (the local branch is always taken), load-bearing if that is lowered.
+void PoseGraph3D::ConnectAlsoToAllFrozen(const int trajectory_id,
+                                         const int other_trajectory_id,
+                                         const common::Time time) {
+  data_.trajectory_connectivity_state.Connect(trajectory_id,
+                                              other_trajectory_id, time);
+  if (!IsTrajectoryFrozen(other_trajectory_id)) return;
+  for (const auto& it : data_.trajectories_state) {
+    if (it.second.state == TrajectoryState::FROZEN &&
+        it.first != trajectory_id && it.first != other_trajectory_id) {
+      data_.trajectory_connectivity_state.Connect(trajectory_id, it.first,
+                                                  time);
+    }
+  }
 }
 
 void PoseGraph3D::DeleteTrajectoriesIfNeeded() {
@@ -434,6 +503,22 @@ void PoseGraph3D::HandleWorkQueue(
     absl::MutexLock locker(&mutex_);
     data_.constraints.insert(data_.constraints.end(), result.begin(),
                              result.end());
+    // A constraint to another trajectory ends that trajectory's bootstrap.
+    for (const Constraint& constraint : result) {
+      if (constraint.tag != Constraint::INTER_SUBMAP ||
+          constraint.node_id.trajectory_id ==
+              constraint.submap_id.trajectory_id) {
+        continue;
+      }
+      auto it = bootstrap_nodes_left_.find(constraint.node_id.trajectory_id);
+      if (it != bootstrap_nodes_left_.end()) {
+        LOG(INFO) << "Trajectory " << it->first
+                  << ": localized (constraint to trajectory "
+                  << constraint.submap_id.trajectory_id
+                  << "), bootstrap search over.";
+        bootstrap_nodes_left_.erase(it);
+      }
+    }
   }
   RunOptimization();
 
@@ -1198,8 +1283,14 @@ void PoseGraph3D::TrimmingHandle::TrimSubmap(const SubmapId& submap_id) {
   // once the submap with 'submap_id' is gone.
   // We need to use node_ids instead of constraints here to be also compatible
   // with frozen trajectories that don't have intra-constraints.
+  // Fork (2026-09-30): only this trajectory's submaps. A submap's node_ids are
+  // the nodes inserted into it, always of its own trajectory, so other
+  // trajectories cannot retain any of them; walking them all (every stored
+  // node of a loaded map, 222k on the 3D campus map) ran under the pose graph
+  // mutex on every live pure-localization trim.
   std::set<NodeId> nodes_to_retain;
-  for (const auto& submap_data : parent_->data_.submap_data) {
+  for (const auto& submap_data :
+       parent_->data_.submap_data.trajectory(submap_id.trajectory_id)) {
     if (submap_data.id != submap_id) {
       nodes_to_retain.insert(submap_data.data.node_ids.begin(),
                              submap_data.data.node_ids.end());
@@ -1265,6 +1356,13 @@ void PoseGraph3D::TrimmingHandle::TrimSubmap(const SubmapId& submap_id) {
   parent_->data_.submap_data.Trim(submap_id);
   parent_->constraint_builder_.DeleteScanMatcher(submap_id);
   parent_->optimization_problem_->TrimSubmap(submap_id);
+  // Fork: also drop the submap from the LAST optimization's pose table, as
+  // PoseGraph2D (fce76857, see there): the next RunOptimization calls
+  // ComputeLocalToGlobalTransform on this table before replacing it, and a
+  // stale last entry throws std::out_of_range in submap_data.at().
+  if (parent_->data_.global_submap_poses_3d.Contains(submap_id)) {
+    parent_->data_.global_submap_poses_3d.Trim(submap_id);
+  }
 
   // We have one submap less, update the gauge metrics.
   kDeletedSubmapsMetric->Increment();
