@@ -22,6 +22,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -282,6 +283,25 @@ void OptimizationProblem3D::Solve(
                : nullptr;
   };
 
+  // Frozen poses are constant parameter blocks, so a residual that touches ONLY frozen poses cannot move
+  // anything: it is dropped, and a frozen pose that no remaining residual touches gets no parameter block.
+  // The solution for every non-frozen pose is unchanged. Without this, pure localization against a large
+  // frozen map rebuilt the whole map into Ceres on every solve (222k frozen nodes and 378k frozen-to-frozen
+  // constraints for the 3D campus map, about once a second). Only for frozen trajectories without
+  // fixed-frame data, and only without landmarks: those residual paths index nodes directly.
+  const auto prunable = [&](int trajectory_id) {
+    return landmark_nodes.empty() && frozen_trajectories.count(trajectory_id) != 0 &&
+           !fixed_frame_pose_data_.HasTrajectory(trajectory_id);
+  };
+  std::set<SubmapId> needed_frozen_submaps;
+  std::set<NodeId> needed_frozen_nodes;
+  for (const Constraint& constraint : constraints) {
+    const bool frozen_submap = prunable(constraint.submap_id.trajectory_id);
+    const bool frozen_node = prunable(constraint.node_id.trajectory_id);
+    if (frozen_submap && !frozen_node) needed_frozen_submaps.insert(constraint.submap_id);
+    if (frozen_node && !frozen_submap) needed_frozen_nodes.insert(constraint.node_id);
+  }
+
   // Set the starting point.
   CHECK(!submap_data_.empty());
   MapById<SubmapId, CeresPose> C_submaps;
@@ -291,6 +311,11 @@ void OptimizationProblem3D::Solve(
   for (const auto& submap_id_data : submap_data_) {
     const bool frozen =
         frozen_trajectories.count(submap_id_data.id.trajectory_id) != 0;
+    if (prunable(submap_id_data.id.trajectory_id) &&
+        needed_frozen_submaps.count(submap_id_data.id) == 0) {
+      first_submap = false;  // it was constant anyway; the gauge must not move to a free submap
+      continue;
+    }
     if (first_submap) {
       first_submap = false;
       // Fix the first submap of the first trajectory except for allowing
@@ -322,6 +347,10 @@ void OptimizationProblem3D::Solve(
   for (const auto& node_id_data : node_data_) {
     const bool frozen =
         frozen_trajectories.count(node_id_data.id.trajectory_id) != 0;
+    if (prunable(node_id_data.id.trajectory_id) &&
+        needed_frozen_nodes.count(node_id_data.id) == 0) {
+      continue;
+    }
     C_nodes.Insert(
         node_id_data.id,
         CeresPose(node_id_data.data.global_pose, translation_parameterization(),
@@ -335,6 +364,10 @@ void OptimizationProblem3D::Solve(
   }
   // Add cost functions for intra- and inter-submap constraints.
   for (const Constraint& constraint : constraints) {
+    if (prunable(constraint.submap_id.trajectory_id) &&
+        prunable(constraint.node_id.trajectory_id)) {
+      continue;
+    }
     problem.AddResidualBlock(
         SpaCostFunction3D::CreateAutoDiffCostFunction(constraint.pose),
         // Loop closure constraints should have a loss function.
