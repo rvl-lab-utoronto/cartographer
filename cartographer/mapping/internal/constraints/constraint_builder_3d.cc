@@ -30,6 +30,7 @@
 #include "Eigen/Eigenvalues"
 #include "absl/memory/memory.h"
 #include "cartographer/common/math.h"
+#include "cartographer/common/timing_log.h"
 #include "cartographer/common/thread_pool.h"
 #include "cartographer/mapping/proto/scan_matching/ceres_scan_matcher_options_3d.pb.h"
 #include "cartographer/mapping/proto/scan_matching/fast_correlative_scan_matcher_options_3d.pb.h"
@@ -188,12 +189,16 @@ ConstraintBuilder3D::DispatchScanMatcherConstruction(const SubmapId& submap_id,
       &submap->rotational_scan_matcher_histogram();
   auto scan_matcher_task = absl::make_unique<common::Task>();
   scan_matcher_task->SetWorkItem(
-      [&submap_scan_matcher, &scan_matcher_options, histogram]() {
+      [&submap_scan_matcher, &scan_matcher_options, histogram, submap_id]() {
+        const double t0 = common::WallSeconds();
         submap_scan_matcher.fast_correlative_scan_matcher =
             absl::make_unique<scan_matching::FastCorrelativeScanMatcher3D>(
                 *submap_scan_matcher.high_resolution_hybrid_grid,
                 submap_scan_matcher.low_resolution_hybrid_grid, histogram,
                 scan_matcher_options);
+        if (common::TimingLogEnabled())
+          LOG(INFO) << "CARTO_TIMING grid_build submap " << submap_id.trajectory_id << "," << submap_id.submap_index
+                    << " ms " << 1e3 * (common::WallSeconds() - t0);
       });
   submap_scan_matcher.creation_task_handle =
       thread_pool_->Schedule(std::move(scan_matcher_task));
@@ -213,6 +218,17 @@ void ConstraintBuilder3D::ComputeConstraint(
   // - the initial guess 'initial_pose' (submap i <- node j).
   std::unique_ptr<scan_matching::FastCorrelativeScanMatcher3D::Result>
       match_result;
+  const double timing_t0 = common::WallSeconds();
+  struct TimingReport {   // logs one line per search when the function returns, found or not
+    const double t0; const SubmapId& sid; const NodeId& nid; const bool full; const bool boot;
+    std::unique_ptr<scan_matching::FastCorrelativeScanMatcher3D::Result>* res; double t_fcsm = 0;
+    ~TimingReport() {
+      if (!common::TimingLogEnabled()) return;
+      LOG(INFO) << "CARTO_TIMING search submap " << sid.trajectory_id << "," << sid.submap_index << " node " << nid.trajectory_id
+                << "," << nid.node_index << (full ? " global" : " local") << (boot ? " bootstrap" : "") << " found " << (*res != nullptr)
+                << " score " << (*res ? (*res)->score : 0.0) << " ms_fcsm " << 1e3 * t_fcsm << " ms_total " << 1e3 * (common::WallSeconds() - t0);
+    }
+  } timing_report{timing_t0, submap_id, node_id, match_full_submap, bootstrap, &match_result};
 
   // Compute 'pose_estimate' in three stages:
   // 1. Fast estimate using the fast correlative scan matcher.
@@ -279,6 +295,7 @@ void ConstraintBuilder3D::ComputeConstraint(
       return;
     }
   }
+  timing_report.t_fcsm = common::WallSeconds() - timing_t0;
   {
     absl::MutexLock locker(&mutex_);
     score_histogram_.Add(match_result->score);

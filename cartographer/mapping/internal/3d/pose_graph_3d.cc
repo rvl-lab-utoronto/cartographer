@@ -31,6 +31,7 @@
 #include "Eigen/Eigenvalues"
 #include "absl/memory/memory.h"
 #include "cartographer/common/math.h"
+#include "cartographer/common/timing_log.h"
 #include "cartographer/mapping/proto/pose_graph/constraint_builder_options.pb.h"
 #include "cartographer/sensor/compressed_point_cloud.h"
 #include "cartographer/sensor/internal/voxel_filter.h"
@@ -323,10 +324,12 @@ WorkItem::Result PoseGraph3D::ComputeConstraintsForNode(
   std::vector<SubmapId> submap_ids;
   std::vector<SubmapId> finished_submap_ids;
   std::set<NodeId> newly_finished_submap_node_ids;
+  common::Time node_time;   // for the timing log below, read under the lock (2026-10-09, see there)
   {
     absl::MutexLock locker(&mutex_);
     const auto& constant_data =
         data_.trajectory_nodes.at(node_id).constant_data;
+    node_time = constant_data->time;
     submap_ids = InitializeGlobalSubmapPoses(
         node_id.trajectory_id, constant_data->time, insertion_submaps);
     CHECK_EQ(submap_ids.size(), insertion_submaps.size());
@@ -388,6 +391,12 @@ WorkItem::Result PoseGraph3D::ComputeConstraintsForNode(
       }
     }
   }
+  if (common::TimingLogEnabled())
+    LOG(INFO) << "CARTO_TIMING node " << node_id.trajectory_id << "," << node_id.node_index << " candidates "
+              << finished_submap_ids.size() << (bootstrap ? " bootstrap" : "") << " t_bag " << common::ToSeconds(
+                     node_time - common::FromUniversal(0));   // was data_.trajectory_nodes.at(node_id) WITHOUT mutex_: raced
+    // AppendNode's inserts on the main thread and threw std::out_of_range "map::at" (pass2, 6 bags, packed jobs with
+    // CARTO_TIMING_LOG=1; backtrace 08-24-18-16-14 pass2g)
   for (const auto& submap_id : finished_submap_ids) {
     ComputeConstraint(node_id, submap_id, bootstrap);
   }
@@ -609,8 +618,12 @@ void PoseGraph3D::DrainWorkQueue() {
   }
   LOG(INFO) << "Remaining work items in queue: " << work_queue_size;
   // We have to optimize again.
+  const double timing_whendone_t0 = common::WallSeconds();
   constraint_builder_.WhenDone(
-      [this](const constraints::ConstraintBuilder3D::Result& result) {
+      [this, timing_whendone_t0, work_queue_size](const constraints::ConstraintBuilder3D::Result& result) {
+        if (common::TimingLogEnabled())
+          LOG(INFO) << "CARTO_TIMING whendone_wait ms " << 1e3 * (common::WallSeconds() - timing_whendone_t0)
+                    << " new_constraints " << result.size() << " queue_left " << work_queue_size;
         HandleWorkQueue(result);
       });
 }
@@ -943,6 +956,7 @@ void PoseGraph3D::RunOptimization() {
   if (optimization_problem_->submap_data().empty()) {
     return;
   }
+  const double timing_t0 = common::WallSeconds();
 
   // No other thread is accessing the optimization_problem_, data_.constraints,
   // data_.frozen_trajectories and data_.landmark_nodes when executing the
@@ -951,6 +965,8 @@ void PoseGraph3D::RunOptimization() {
   optimization_problem_->Solve(data_.constraints, GetTrajectoryStates(),
                                data_.landmark_nodes);
   absl::MutexLock locker(&mutex_);
+  if (common::TimingLogEnabled())
+    LOG(INFO) << "CARTO_TIMING solve ms " << 1e3 * (common::WallSeconds() - timing_t0) << " constraints " << data_.constraints.size();
 
   const auto& submap_data = optimization_problem_->submap_data();
   const auto& node_data = optimization_problem_->node_data();

@@ -129,6 +129,8 @@ class OptimizationProblem3D
   sensor::MapByTime<sensor::ImuData> imu_data_;
   sensor::MapByTime<sensor::OdometryData> odometry_data_;
   sensor::MapByTime<sensor::FixedFramePoseData> fixed_frame_pose_data_;
+  // Fork (2026-10-08): trajectories that have had an inter-trajectory constraint at least once (see Solve).
+  std::set<int> ever_connected_trajectories_;
   std::map<int, PoseGraphInterface::TrajectoryData> trajectory_data_;
 };
 

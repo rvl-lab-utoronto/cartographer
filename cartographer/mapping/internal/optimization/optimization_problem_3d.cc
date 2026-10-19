@@ -16,6 +16,8 @@
 
 #include "cartographer/mapping/internal/optimization/optimization_problem_3d.h"
 
+#include <cstdlib>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -302,6 +304,27 @@ void OptimizationProblem3D::Solve(
     if (frozen_node && !frozen_submap) needed_frozen_nodes.insert(constraint.node_id);
   }
 
+  // Fork (2026-10-08): a non-frozen trajectory with NO constraint to any other trajectory (pure localization before
+  // its first map match) has no gauge: the frozen map's submaps are pruned above, so nothing ties it to the map, and
+  // Ceres moved it freely -- wild_uoft_2026-07-10-17-58-24 (zero matches) was turned 178 deg at 13 s, and later
+  // low-floor matches in the flipped orientation locked the flip in. Hold such a trajectory at its initial global pose
+  // (its first submap fully constant) until its first inter-trajectory constraint; from then on it is solved exactly
+  // as before. Only with frozen trajectories present (localization), so mapping is unchanged.
+  std::set<int> connected_trajectories;
+  for (const Constraint& constraint : constraints) {
+    if (constraint.submap_id.trajectory_id != constraint.node_id.trajectory_id) {
+      connected_trajectories.insert(constraint.submap_id.trajectory_id);
+      connected_trajectories.insert(constraint.node_id.trajectory_id);
+    }
+  }
+  // Only BEFORE the first map match: pure localization trims old live submaps together with their map constraints, so an
+  // anchored trajectory can momentarily have none; re-pinning it then froze it off the map (09-22-11-01-49: 0.70 m median
+  // with re-pinning vs 0.05 m without, same 108 matches).
+  ever_connected_trajectories_.insert(connected_trajectories.begin(), connected_trajectories.end());
+  connected_trajectories = ever_connected_trajectories_;
+  std::set<int> pinned_trajectories;
+  static const bool kNoPin = std::getenv("CARTO_NO_PIN") != nullptr;   // diagnostic A/B switch
+
   // Set the starting point.
   CHECK(!submap_data_.empty());
   MapById<SubmapId, CeresPose> C_submaps;
@@ -316,10 +339,17 @@ void OptimizationProblem3D::Solve(
       first_submap = false;  // it was constant anyway; the gauge must not move to a free submap
       continue;
     }
-    if (first_submap) {
-      first_submap = false;
-      // Fix the first submap of the first trajectory except for allowing
-      // gravity alignment.
+    const int submap_trajectory_id = submap_id_data.id.trajectory_id;
+    const bool pin_unanchored =
+        !kNoPin && !frozen && !frozen_trajectories.empty() &&
+        connected_trajectories.count(submap_trajectory_id) == 0 &&
+        pinned_trajectories.insert(submap_trajectory_id).second;
+    const bool first_submap_of_problem = first_submap;
+    if (first_submap || pin_unanchored) {
+      if (first_submap) first_submap = false;
+      // Fix the first submap of the first trajectory (or of an unanchored
+      // localization trajectory, see above) except for allowing gravity
+      // alignment.
       C_submaps.Insert(
           submap_id_data.id,
           CeresPose(submap_id_data.data.global_pose,
@@ -329,6 +359,12 @@ void OptimizationProblem3D::Solve(
                     &problem));
       problem.SetParameterBlockConstant(
           C_submaps.at(submap_id_data.id).translation());
+      // An unanchored trajectory is held completely: with roll/pitch left free (as for the global first submap,
+      // where IMU gravity holds them) the same bag still tumbled -- heading wild from the first turn, 25 m off.
+      if (pin_unanchored && !first_submap_of_problem) {
+        problem.SetParameterBlockConstant(
+            C_submaps.at(submap_id_data.id).rotation());
+      }
     } else {
       C_submaps.Insert(
           submap_id_data.id,
