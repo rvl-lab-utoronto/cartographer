@@ -422,7 +422,8 @@ void OptimizationProblem3D::Solve(
   // linear acceleration.
   // Fork (2026-10-19): skipped entirely when both IMU weights are 0 (the live localization lua): the blocks below
   // would integrate the IMU three times per node pair and add two autodiff residuals per node, all scaled by 0, on
-  // every solve. The solution is unchanged. UNVALIDATED (live): offline loop and live replay not yet run with it.
+  // every solve. The solution is unchanged. VERIFIED OFFLINE (2026-10-19: legion bag-play; the lockstep loop has not
+  // run with it yet; not yet on the robot).
   const bool imu_terms_weighted =
       options_.acceleration_weight() != 0. || options_.rotation_weight() != 0.;
   if (!options_.fix_z_in_3d() && imu_terms_weighted) {
