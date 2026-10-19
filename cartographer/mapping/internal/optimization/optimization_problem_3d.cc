@@ -420,7 +420,12 @@ void OptimizationProblem3D::Solve(
                            &problem, options_.huber_scale());
   // Add constraints based on IMU observations of angular velocities and
   // linear acceleration.
-  if (!options_.fix_z_in_3d()) {
+  // Fork (2026-10-19): skipped entirely when both IMU weights are 0 (the live localization lua): the blocks below
+  // would integrate the IMU three times per node pair and add two autodiff residuals per node, all scaled by 0, on
+  // every solve. The solution is unchanged. UNVALIDATED (live): offline loop and live replay not yet run with it.
+  const bool imu_terms_weighted =
+      options_.acceleration_weight() != 0. || options_.rotation_weight() != 0.;
+  if (!options_.fix_z_in_3d() && imu_terms_weighted) {
     for (auto node_it = node_data_.begin(); node_it != node_data_.end();) {
       const int trajectory_id = node_it->id.trajectory_id;
       const auto trajectory_end = node_data_.EndOfTrajectory(trajectory_id);
