@@ -208,7 +208,10 @@ bool InsidePolygon(const std::vector<double>& polygon, const double x,
 
 void OverlappingSubmapsTrimmer2D::Trim(Trimmable* pose_graph) {
   const auto submap_data = pose_graph->GetOptimizedSubmapData();
-  if (submap_data.size() - current_submap_count_ <= min_added_submaps_count_) {
+  // Empty graph (e.g. after the last trajectory finished) or fewer submaps than at the last trim: nothing to do. The
+  // unsigned subtraction below would wrap and begin()->data would be dereferenced on an empty map.
+  if (submap_data.empty() || submap_data.size() < current_submap_count_ ||
+      submap_data.size() - current_submap_count_ <= min_added_submaps_count_) {
     return;
   }
 
